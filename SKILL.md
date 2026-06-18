@@ -30,19 +30,19 @@ Trigger when the user says any of:
 ### Quick check
 
 ```bash
-NETEASE_USER="13056545170@163.com" NETEASE_PASS="<from memory>" python3 /home/xh/.email_notify.py
+NETEASE_USER="your@163.com" NETEASE_PASS="<auth_code>" python3 email_notify.py
 ```
 
 ### Catch-up mode (process recent N emails)
 
 ```bash
-NETEASE_USER="..." NETEASE_PASS="..." python3 /home/xh/.email_notify.py --catchup 30
+NETEASE_USER="..." NETEASE_PASS="..." python3 ./email_notify.py --catchup 30
 ```
 
 ### Dry run (preview only)
 
 ```bash
-NETEASE_USER="..." NETEASE_PASS="..." python3 /home/xh/.email_notify.py --dry
+NETEASE_USER="..." NETEASE_PASS="..." python3 ./email_notify.py --dry
 ```
 
 ### Set up auto-check
@@ -57,7 +57,7 @@ Or schedule via cron:
 
 ```bash
 # Every 12 hours at :07 past the hour
-*/12 * * * * NETEASE_USER="..." NETEASE_PASS="..." python3 /home/xh/.email_notify.py
+*/12 * * * * NETEASE_USER="..." NETEASE_PASS="..." python3 ./email_notify.py
 ```
 
 ## File organization
