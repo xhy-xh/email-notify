@@ -1,0 +1,18 @@
+name: email-notify
+version: 1.0.0
+description: >
+  Monitor 163.com NetEase email for project progress updates (Genscript orders,
+  logistics deliveries, gene synthesis status), auto-save emails and attachments
+  to organized project folders, and send Windows desktop notification popups
+  with email summaries from WSL/Ubuntu Claude Code.
+
+triggers:
+  - 查邮件
+  - 看邮件
+  - 邮箱
+  - 订单进度
+  - 基因合成进展
+  - 物流
+  - email check
+  - 邮件提醒
+  - 收邮件
