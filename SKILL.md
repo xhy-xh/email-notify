@@ -2,19 +2,18 @@
 name: email-notify
 description: Monitor 163.com NetEase email for project progress updates, auto-save to organized folders with attachments, and send Windows desktop notifications. Use when the user asks to check email, 查邮件, 看邮件, 邮箱, 订单进度, 基因合成进展, 物流, or wants email-to-desktop-notification automation.
 version: 1.0.0
-author: Xiang Haiyuan
 ---
 
 # Email Notify — 163邮箱进展监控 + Windows弹窗
 
-Checks 163.com NetEase email for progress-related emails (金斯瑞/金唯智/生生物流), saves them to organized project folders, downloads attachments, and sends Windows desktop popups with summaries.
+Checks 163.com NetEase email for progress-related emails, saves them to organized project folders, downloads attachments, and sends Windows desktop popups with summaries.
 
 ## Architecture
 
 ```
-Claude Code (WSL) ──> email_notify.py ──> IMAP (163.com)
-                                      ──> Save to OneDrive/beelab/邮箱/
-                                      ──> notify.py ──> Windows MsgBox
+Claude Code (WSL) --> email_notify.py --> IMAP (163.com)
+                                      --> Save to project folder
+                                      --> Windows MsgBox popup
 ```
 
 ## When to use
@@ -36,13 +35,13 @@ NETEASE_USER="your@163.com" NETEASE_PASS="<auth_code>" python3 email_notify.py
 ### Catch-up mode (process recent N emails)
 
 ```bash
-NETEASE_USER="..." NETEASE_PASS="..." python3 ./email_notify.py --catchup 30
+NETEASE_USER="..." NETEASE_PASS="..." python3 email_notify.py --catchup 30
 ```
 
 ### Dry run (preview only)
 
 ```bash
-NETEASE_USER="..." NETEASE_PASS="..." python3 ./email_notify.py --dry
+NETEASE_USER="..." NETEASE_PASS="..." python3 email_notify.py --dry
 ```
 
 ### Set up auto-check
@@ -53,78 +52,80 @@ Use Claude Code cron or /loop:
 /loop 12h 检查163邮箱进展邮件
 ```
 
-Or schedule via cron:
-
-```bash
-# Every 12 hours at :07 past the hour
-*/12 * * * * NETEASE_USER="..." NETEASE_PASS="..." python3 ./email_notify.py
-```
-
 ## File organization
 
-Emails are saved to `C:\Users\xh\OneDrive\文档\工作\beelab\邮箱\` with this structure:
+Emails are saved to the configured directory with this structure:
 
 ```
-邮箱/
-├── C7449KFMG0_CSFV-PRV_基因合成/
-│   ├── README.md              ← structured email summary
-│   ├── 说明.txt                ← Chinese summary
-│   ├── Quote-C7449KFMG0.pdf   ← attachment (original name)
-│   ├── GB_Final_C7449KFMG0.zip
-│   └── CSFV-PRV-pUC57-Kan.dna
-├── C555NCDJG0_PIV5-F_基因合成/
-├── C563PGKGG0_CSFV-E2-PRV-gD_基因合成/
-├── 生生物流_90519130/
-└── 金唯智测序/
+{EMAIL_SAVE_DIR}/
+├── ORDER0000_GENE-A_基因合成/
+│   ├── README.md              <- structured email summary
+│   ├── summary.txt             <- brief summary
+│   ├── Quote-ORDER0000.pdf    <- attachment (original name)
+│   ├── OptimizationResult.zip
+│   └── sequence.dna
+├── ORDER1111_GENE-B_基因合成/
+├── Logistics_12345678/
+└── Sequencing/
 ```
 
 Directory naming convention:
-- Orders: `{订单号}_{基因名}_{业务类型}` (e.g. `C7449KFMG0_CSFV-PRV_基因合成`)
+- Orders: `{OrderNumber}_{GeneName}_{Type}`
 - Same order emails append to existing README
-- Logistics/other: `{发件人}_{主题关键词}`
+- Logistics/other: `{Sender}_{Subject}`
+
+## Configuration
+
+Set env vars to customize save paths:
+
+| Variable | Description |
+|----------|-------------|
+| `EMAIL_SAVE_DIR_WIN` | Windows path for saving emails |
+| `EMAIL_POP_DIR_WIN` | Temp dir for VBS popup scripts |
+| `NETEASE_USER` | 163.com email address |
+| `NETEASE_PASS` | 163.com IMAP auth code |
 
 ## Monitored senders
 
-| Type | Sender | Example |
-|------|--------|---------|
-| 金斯瑞技术支持 | tech-caoyang@genscript.com.cn | 报价、订单安排 |
-| 金斯瑞订单状态 | yori.yu@genscript.com | 进度更新 |
-| 金斯瑞验收 | jinhe1.wang@genscript.com | 订单验收确认 |
-| 生生物流 | noreply@ashsh.cn | 物流/温度记录 |
-| 金唯智测序 | genewiz/azenta | 测序结果 |
+Customize `WATCH_SENDERS` in the script. Default watches for:
+- Gene synthesis order confirmations
+- Sequencing results
+- Logistics/delivery notifications
+- Order quotes and status updates
 
 ## Filtered out (auto-mark read)
 
-- 网易邮箱会员广告 (`member@service.netease.com`)
-- 网易安全提醒 (`safe@service.netease.com`)
-- giffgaff 手机卡邮件
+Customize `SKIP_SENDERS` in the script. Default skips:
+- NetEase member ads
+- Security notice emails
+- Other known junk senders
 
 ## Popup format
 
 When progress emails are found, a Windows MsgBox pops up with:
 
 ```
-邮件提醒 - X封新邮件
-─────────────────
-发件人: Caoyang Genscript
-主题: 报价：C7449KFMG0 密码子优化质粒构建
+Email - 2 new
+------------------------------
+Sender: Company Support
+Subject: Quote ORDER0000 gene synthesis
 
-附件:
-  + Quote-C7449KFMG0.pdf
-  + Order-C7449KFMG0.txt
+Attachments:
+  + Quote-ORDER0000.pdf
+  + Order-ORDER0000.txt
 
-已保存至:
-  C:\Users\xh\OneDrive\文档\工作\beelab\邮箱\C7449KFMG0_CSFV-PRV_基因合成
+Saved to:
+  C:\Users\...\email_archive\ORDER0000_GENE-A_基因合成
 ```
 
 No popup if no progress emails found.
 
 ## Dependencies
 
-- Python 3 with `openpyxl` (not strictly required, used for reading primer inventory)
+- Python 3
 - WSL with `/mnt/c/Windows/System32/wscript.exe` accessible
 - IMAP access to `imap.163.com:993`
-- Email credentials in memory (`memory/netemail_credentials.md`)
+- Email credentials in env vars or memory
 
 ## Notes
 

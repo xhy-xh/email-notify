@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 r"""
-Check 163 email for progress-related unread -> save to beelab/邮箱/ -> Windows popup.
-
-Organization follows existing convention:
-  C:\Users\xh\OneDrive\文档\工作\beelab\邮箱\
+Check 163 email for progress-related unread -> save to project folder -> Windows popup.
 
 For each relevant email:
-  - If order number found (e.g. C563PGKGG0): dirname = 订单号_基因_业务
-  - Otherwise: dirname = 发件人_主题
-  - Saves README.md (structured summary) + 说明.txt (simple notes)
+  - If order number found (e.g. C1234ABCD0): dirname = order_gene_type
+  - Otherwise: dirname = sender_subject
+  - Saves README.md (structured summary) + summary.txt
   - Downloads all attachments with original readable filenames
   - If directory already exists, appends new email to existing README
   - Sends Windows popup summarizing what was saved and where
 
 Usage:
-  python3 .email_notify.py              # check unread only
-  python3 .email_notify.py --dry        # preview only
-  python3 .email_notify.py --catchup N  # process last N emails (even if read)
+  python3 email_notify.py              # check unread only
+  python3 email_notify.py --dry        # preview only
+  python3 email_notify.py --catchup N  # process last N emails (even if read)
+
+Configuration via env vars:
+  EMAIL_SAVE_DIR_WIN  - Windows path for saving emails (default: C:\Users\<user>\email_archive)
+  EMAIL_POP_DIR_WIN   - temp dir for VBS popup scripts (default: C:\Users\<user>\temp)
 """
 
 import email
@@ -33,24 +34,29 @@ from email.policy import default
 
 IMAP_HOST = "imap.163.com"
 IMAP_PORT = 993
-SAVE_ROOT_WSL = "/mnt/c/Users/xh/OneDrive/文档/工作/beelab/邮箱"
-SAVE_ROOT_WIN = r"C:\Users\xh\OneDrive\文档\工作\beelab\邮箱"
-WSCRIPT = "/mnt/c/Windows/System32/wscript.exe"
-POP_DIR_WIN = "C:\\Users\\xh\\experiment_reminders"
-POP_DIR_WSL = "/mnt/c/Users/xh/experiment_reminders"
 
+# Override via env vars
+_DEFAULT_SAVE = os.path.join(os.environ.get("USERPROFILE", "C:/Users/default"), "email_archive")
+SAVE_ROOT_WIN = os.environ.get("EMAIL_SAVE_DIR_WIN", _DEFAULT_SAVE)
+SAVE_ROOT_WSL = SAVE_ROOT_WIN.replace("C:\\", "/mnt/c/").replace("\\", "/")
+
+_DEFAULT_POP = os.path.join(os.environ.get("USERPROFILE", "C:/Users/default"), "temp")
+POP_DIR_WIN = os.environ.get("EMAIL_POP_DIR_WIN", _DEFAULT_POP)
+POP_DIR_WSL = POP_DIR_WIN.replace("C:\\", "/mnt/c/").replace("\\", "/")
+
+WSCRIPT = "/mnt/c/Windows/System32/wscript.exe"
+
+# Senders to watch (customize for your needs)
 WATCH_SENDERS = [
     "genscript.com", "genscript.com.cn",
     "ashsh.cn",
-    "jinhe1.wang",
-    "yori.yu",
     "order", "合成", "基因", "引物", "测序",
-    "金唯智", "安升达", "azenta", "genewiz",
+    "genewiz", "azenta",
 ]
+# Senders to always skip (junk)
 SKIP_SENDERS = [
     "member@service.netease.com", "safe@service.netease.com",
-    "giffgaff", "email.sevenroom", "transaction.giffgaff",
-    "no_reply@giffgaff",
+    "noreply", "no_reply",
 ]
 
 
@@ -124,7 +130,6 @@ def parse_email(msg):
             charset = msg.get_content_charset() or "utf-8"
             body_parts.append(("text", payload.decode(charset, errors="replace")))
 
-    # Prefer plain text, fallback to HTML
     body = ""
     for btype, btext in body_parts:
         if btype == "plain":
@@ -156,16 +161,17 @@ def sanitize_filename(s, max_len=100):
 
 
 def extract_order_number(subject, body):
-    """Extract order number from subject/body. E.g. C563PGKGG0, 80-1918703503."""
-    # 金斯瑞 format: C + digits + letters (e.g. C332XYWEG0, C631GEXNG0)
-    m = re.search(r'\b(C\d{3,4}[A-Z]{2,6}\d{0,3})\b', subject + " " + body[:500])
+    """Extract order number from subject/body."""
+    text = subject + " " + body[:500]
+    # Format: C + digits + letters
+    m = re.search(r'\b(C\d{3,4}[A-Z]{2,6}\d{0,3})\b', text)
     if m:
         return m.group(1)
-    # 金唯智/Azenta format: 80-xxxxxxxx
-    m = re.search(r'\b(80-\d{7,10})\b', subject + " " + body[:500])
+    # Format: 80-xxxxxxxx
+    m = re.search(r'\b(80-\d{7,10})\b', text)
     if m:
         return m.group(1)
-    # 生生物流 format: 8+ digits (but not CRM:XXXXXX)
+    # Format: 8+ digits (logistics tracking)
     m = re.search(r'(?<!CRM:)(?<!CRM)\b(\d{8,10})\b', subject)
     if m:
         return m.group(1)
@@ -176,13 +182,7 @@ def extract_gene_name(subject, body):
     """Extract gene/product name from subject/body."""
     text = subject + " " + body[:1000]
     patterns = [
-        r'(CSFV[\w-]*E\d[\w-]*)',
-        r'(PRV[\w-]*[gG][\w-]*[BCD])',
-        r'(PEDV[\w-]*)',
-        r'(PIV\d[\w-]*)',
-        r'(HIV[\w-]*)',
-        r'(mRNA[\w-]*)',
-        r'(LNP[\w-]*)',
+        r'([A-Z]{2,5}[\w-]*[A-Z]\d[\w-]*)',
         r'基因名[称]?[：:]\s*(\S{3,20})',
         r'Gene[：:]\s*(\S{3,20})',
     ]
@@ -191,7 +191,6 @@ def extract_gene_name(subject, body):
         m = re.search(pat, text, re.IGNORECASE)
         if m:
             name = m.group(1).upper()
-            # Filter out amino acid sequences (>20 chars of only letters)
             if len(name) <= 20 or not re.match(r'^[A-Z]+$', name):
                 found.append(name[:20])
     return "-".join(found[:3]) if found else None
@@ -202,12 +201,11 @@ def extract_biz_type(subject, body):
     text = (subject + " " + body[:500]).lower()
     types = {
         "基因合成": ["基因合成", "gene synthesis", "gene order", "codon optimization",
-                   "密码子优化", "基因合成服务"],
+                   "密码子优化"],
         "测序": ["测序", "sequencing", "测序结果"],
         "引物": ["引物", "primer", "oligo"],
-        "物流": ["物流", "送达", "温度记录", "delivery", "shipment", "tracking"],
+        "物流": ["物流", "送达", "温度记录", "delivery", "shipment"],
         "报价": ["报价", "quote", "quotation"],
-        "QC检测": ["qc", "检测", "质量控制", "quality control"],
     }
     for label, keywords in types.items():
         for kw in keywords:
@@ -217,7 +215,7 @@ def extract_biz_type(subject, body):
 
 
 def build_dirname(from_addr, subject, body):
-    """Build directory name following existing convention."""
+    """Build directory name."""
     order = extract_order_number(subject, body)
     gene = extract_gene_name(subject, body)
     biz = extract_biz_type(subject, body)
@@ -231,7 +229,6 @@ def build_dirname(from_addr, subject, body):
     elif order:
         return sanitize_filename(f"{order}", max_len=80)
     else:
-        # Use sender + subject
         sender = short_sender(from_addr)
         subj = sanitize_filename(subject, max_len=50)
         return sanitize_filename(f"{sender}_{subj}", max_len=80)
@@ -254,11 +251,9 @@ def find_existing_dir(dirname):
     """Check if a directory matching this order already exists (by order number prefix)."""
     if not os.path.isdir(SAVE_ROOT_WSL):
         return None
-    # Try exact match first
     exact = os.path.join(SAVE_ROOT_WSL, dirname)
     if os.path.isdir(exact):
         return exact
-    # Try matching by order number (first segment before _)
     prefix = dirname.split('_')[0]
     if re.match(r'^(C[A-Za-z0-9]{4,}|80-\d+|\d{8,})$', prefix):
         for entry in os.listdir(SAVE_ROOT_WSL):
@@ -287,7 +282,6 @@ def build_readme(from_addr, subject, body, attachments, date_str):
     lines.append("")
     lines.append("## 邮件内容")
     lines.append("")
-    # Clean body for markdown
     clean_body = body[:3000]
     lines.append(clean_body)
     if len(body) > 3000:
@@ -297,7 +291,7 @@ def build_readme(from_addr, subject, body, attachments, date_str):
 
 
 def build_shuoming(from_addr, subject, attachments, date_str, savedir_win):
-    """Build 说明.txt content."""
+    """Build summary.txt content."""
     lines = []
     lines.append(f"邮件: {subject}")
     lines.append(f"发件人: {from_addr}")
@@ -366,7 +360,7 @@ def main():
         if catchup:
             status, data = conn.search(None, "ALL")
             all_ids = data[0].split()
-            ids = all_ids[-catchup:]  # last N emails
+            ids = all_ids[-catchup:]
             is_unseen = set()
             status, unseen_data = conn.search(None, "UNSEEN")
             for mid in unseen_data[0].split():
@@ -391,13 +385,9 @@ def main():
             date_str = decode_text(hdr.get('Date', ''))
 
             if should_skip(from_addr):
-                conn.store(mid, '+FLAGS', '\\Seen')  # auto-mark junk as read
+                conn.store(mid, '+FLAGS', '\\Seen')
                 continue
             if should_watch(from_addr, subject):
-                # In catchup mode, skip if already has a matching directory
-                # (quick check without full fetch)
-                if catchup and mid not in is_unseen:
-                    pass  # will check dir later, but still process
                 status, data = conn.fetch(mid, "(RFC822)")
                 msg = email.message_from_bytes(data[0][1], policy=default)
                 body, attachments = parse_email(msg)
@@ -433,8 +423,6 @@ def main():
             print(f"[Dry run — {len(relevant)} emails would be processed]")
             return
 
-        # Save and notify - skip if not unread in catchup mode (already processed)
-        new_emails = []
         popup_lines = []
 
         for i, r in enumerate(relevant):
@@ -450,7 +438,6 @@ def main():
                 os.makedirs(savedir_wsl, exist_ok=True)
                 is_new_dir = True
 
-            # Skip if not unseen AND (exact subject already in README)
             if not r['is_unseen']:
                 readme_path = os.path.join(savedir_wsl, "README.md")
                 if os.path.exists(readme_path):
@@ -461,7 +448,6 @@ def main():
 
             email_hash = hashlib.md5(f"{r['date']}{r['subject']}".encode()).hexdigest()[:8]
 
-            # Save README
             readme_path = os.path.join(savedir_wsl, "README.md")
             if is_new_dir:
                 readme_content = build_readme(r['from'], r['subject'], r['body'],
@@ -471,7 +457,7 @@ def main():
             else:
                 existing_readme = ""
                 if os.path.exists(readme_path):
-                    with open(readme_path, 'r', encoding='utf-8') as f:
+                    with open(readme_path, 'r', encoding='utf-8', errors='replace') as f:
                         existing_readme = f.read()
                 if email_hash not in existing_readme and r['subject'] not in existing_readme:
                     append_block = f"\n\n---\n\n### {r['subject']}\n"
@@ -487,7 +473,7 @@ def main():
 
             shuoming = build_shuoming(r['from'], r['subject'], r['attachments'],
                                        r['date'], savedir_win)
-            with open(os.path.join(savedir_wsl, "说明.txt"), 'w', encoding='utf-8') as f:
+            with open(os.path.join(savedir_wsl, "summary.txt"), 'w', encoding='utf-8') as f:
                 f.write(shuoming)
 
             saved_files = []
@@ -495,38 +481,35 @@ def main():
                 clean_name = sanitize_filename(fname)
                 att_path = os.path.join(savedir_wsl, clean_name)
                 if os.path.exists(att_path) and os.path.getsize(att_path) == len(fdata):
-                    saved_files.append(f"{clean_name} (已存在)")
+                    saved_files.append(f"{clean_name} (exists)")
                     continue
                 with open(att_path, 'wb') as f:
                     f.write(fdata)
                 saved_files.append(clean_name)
 
-            new_emails.append(r)
-            print(f"[{i+1}] → {savedir_win}")
-            print(f"      附件: {saved_files}")
+            print(f"[{i+1}] -> {savedir_win}")
+            print(f"      attachments: {saved_files}")
 
             if len(popup_lines) < 20:
                 if popup_lines:
-                    popup_lines.append("─" * 30)
-                popup_lines.append(f"发件人: {short_sender(r['from'])}")
-                popup_lines.append(f"主题: {r['subject']}")
+                    popup_lines.append("-" * 30)
+                popup_lines.append(f"Sender: {short_sender(r['from'])}")
+                popup_lines.append(f"Subject: {r['subject']}")
                 if r['attachments']:
-                    popup_lines.append("附件:")
+                    popup_lines.append("Attachments:")
                     for fname, _, _ in r['attachments']:
                         popup_lines.append(f"  + {sanitize_filename(fname)}")
                 else:
-                    popup_lines.append("附件: 无")
-                popup_lines.append(f"已保存至:")
+                    popup_lines.append("Attachments: none")
+                popup_lines.append(f"Saved to:")
                 popup_lines.append(f"  {savedir_win}")
 
-            # Mark as read only if was unseen
             if r['is_unseen']:
                 conn.store(r['mid'], '+FLAGS', '\\Seen')
 
-        if new_emails:
-            title = f"邮件提醒 - {len(new_emails)}封新邮件"
-            send_popup(title, popup_lines[:25])
-            print(f"\nDone: {len(new_emails)} email(s) saved + notified.")
+        if popup_lines:
+            send_popup(f"Email - {len(relevant)} new", popup_lines[:25])
+            print(f"\nDone: {len(relevant)} email(s) saved + notified.")
         else:
             print("\nNo new emails to save.")
 
